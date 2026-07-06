@@ -132,23 +132,8 @@ If PIA drops port forwarding support for an endpoint, change `VPN_REMOTE_SERVER`
 - After any qBittorrent container update, verify Mousehole is still seeing the PIA IP
 - Check `/tmp/getvpnport` exists before assuming qBittorrent is fully started; its absence means port forwarding failed
 
-## Template for new entries
+---
 
-```
-## [Issue title]
-
-**Symptom:**
-
-**Diagnosis steps:**
-1.
-
-**Root cause:**
-
-**Fix:**
-
-**Prevention:**
-
-```
 ## 4. Audiobookshelf (ABS) library organization at scale
 
 **Context:**
@@ -210,7 +195,7 @@ Manually tagging series metadata (covers, summaries, reading order) for a large 
 **Fix (setup used):**
 - Deploy Komga as the manga server (library scanning, reading, series organization).
 - Deploy Komf alongside it configured against Komga's API to automatically pull and apply metadata/cover art from configured metadata providers.
-- Verify folder structure matches what Komga expects per series (one folder per series, volumes/chapters named consistently) — Komf's matching accuracy depends heavily on clean, consistent naming, same underlying lesson as the ABS folder work in item #7.
+- Verify folder structure matches what Komga expects per series (one folder per series, volumes/chapters named consistently) — Komf's matching accuracy depends heavily on clean, consistent naming, same underlying lesson as the ABS folder work in item #4.
 - Spot-check a handful of series after each Komf run before trusting it across the whole library, since mismatches (wrong series matched) are easier to catch early than after they've propagated.
 
 **Prevention:**
@@ -317,3 +302,20 @@ turn_allow_guests: false
 - Mobile clients should use the Jitsi Meet app pointed at `meet.stephens-group.net` rather than the browser — set server in app settings once, never touch again.
 
 ---
+
+## Template for new entries
+
+```
+## [Issue title]
+
+**Symptom:**
+
+**Diagnosis steps:**
+1.
+
+**Root cause:**
+
+**Fix:**
+
+**Prevention:**
+```
