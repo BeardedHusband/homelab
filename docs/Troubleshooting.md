@@ -277,3 +277,43 @@ Playback for certain files required CPU-based transcoding (high load, potential 
 - Confirm GPU passthrough survives UnRAID updates/container recreation — this is a common thing to silently break after an update.
 
 ---
+
+## 10. Jitsi self-hosted — mobile clients disconnecting immediately on join
+
+> ⚠️ **UNRESOLVED** — Root cause suspected but not confirmed. Fix section incomplete. Return to this when ready to troubleshoot TURN configuration.
+
+**Symptom:**
+Mobile clients (iOS/Android, via browser at `meet.stephens-group.net`) receive "You have been disconnected — check your network connection" immediately or within seconds of joining a Jitsi room. Desktop clients on LAN connect without issue.
+
+**Diagnosis steps:**
+1. Confirm TURN is generating relay candidates — go to `https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/`, add your TURN server URI (`turn:yourdomain.com:3478`), enter credentials, click "Gather candidates." You need to see `relay` type candidates appear. If only `host` and `srflx` appear, TURN is unreachable or misconfigured.
+2. Verify firewall and router have UDP 3478 and relay port range 49152–65535 open and forwarded.
+3. Check `turnserver.conf` for correct `external-ip` value pointing to your public IP.
+4. Check Jitsi `config.js` for `p2p: { enabled: true }` — mobile clients attempt P2P first, fail, and may not fall back to TURN correctly:
+```javascript
+p2p: {
+    enabled: false
+}
+```
+5. Verify Synapse `homeserver.yaml` TURN block is correct:
+```yaml
+turn_uris:
+  - "turn:yourdomain.com:3478?transport=udp"
+  - "turn:yourdomain.com:3478?transport=tcp"
+turn_shared_secret: "your_secret"
+turn_user_lifetime: 86400000
+turn_allow_guests: false
+```
+
+**Root cause:**
+*(Unconfirmed)* Mobile devices behind NAT/cellular cannot establish direct peer-to-peer WebRTC connections and are fully dependent on TURN relay. TURN server is either unreachable, misconfigured, or not correctly wired into Jitsi config. Desktop LAN clients mask the problem because they can connect directly.
+
+**Fix:**
+*(Incomplete — return to finish)*
+
+**Prevention:**
+- Always verify TURN with the Trickle ICE tool after initial setup and after any firewall or router changes — TURN failures are silent on LAN but immediately fatal for mobile.
+- Disable P2P in `config.js` on self-hosted instances.
+- Mobile clients should use the Jitsi Meet app pointed at `meet.stephens-group.net` rather than the browser — set server in app settings once, never touch again.
+
+---
