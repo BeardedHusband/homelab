@@ -147,5 +147,133 @@ If PIA drops port forwarding support for an endpoint, change `VPN_REMOTE_SERVER`
 **Fix:**
 
 **Prevention:**
-```
 
+```
+## 4. Audiobookshelf (ABS) library organization at scale
+
+**Context:**
+800+ audiobooks accumulated over time with inconsistent folder naming/structure, causing ABS to mis-match metadata, split series incorrectly, or fail to scan books at all.
+
+**Symptom:**
+Books show up as "missing metadata," duplicate entries appear for the same book, series get split across multiple entries, or ABS's scanner skips folders entirely.
+
+**Root cause:**
+ABS expects a fairly consistent folder structure to reliably match metadata (typically `Author/Series/Book Title (Year)/` or `Author/Book Title (Year)/`, one book per folder, audio files inside). Years of ad-hoc downloading/ripping had produced inconsistent naming: missing years, inconsistent author name formatting (e.g. "Last, First" vs "First Last"), series info embedded inconsistently or missing, and some multi-file books split across nested subfolders ABS didn't expect.
+
+**Fix (approach used):**
+- Wrote iterative PowerShell scripts to walk the existing library tree and normalize folder/file naming in batches rather than by hand:
+  - Standardize author folder naming to a single convention.
+  - Detect and tag series info into folder names where identifiable from existing metadata/filenames.
+  - Flatten unexpected nested subfolder structures so each book lives in one folder.
+  - Run scripts against a *copy* or small test batch first, verify ABS picks it up correctly, then run against the full library.
+- Re-scanned the library in ABS after each batch and spot-checked problem entries before moving to the next batch, rather than running one giant rename pass across everything at once.
+
+**Prevention:**
+- Adopt the target folder convention (`Author/Series/Book Title (Year)/`) at ingest time going forward — normalize new downloads before they land in the ABS library folder rather than letting inconsistencies accumulate again.
+- Keep the PowerShell scripts around and versioned (this repo) so future cleanup passes don't start from scratch.
+
+---
+
+## 5. Ebook/audiobook delivery pipeline: Kavita → Calibre-Web migration + Kindle delivery
+
+**Context:**
+Originally used Kavita for ebook serving; migrated to Calibre-Web for better OPDS support and metadata handling, with delivery to a jailbroken Kindle Paperwhite (10th gen) running KOReader.
+
+**Symptom / motivation for migration:**
+Kavita's OPDS implementation and metadata handling weren't a good fit for the way books needed to sync to KOReader on the jailbroken Kindle; Calibre-Web's tighter Calibre-library integration and mature OPDS feed support were a better match.
+
+**Migration steps:**
+1. Stand up Calibre-Web pointed at a proper Calibre library (not just a raw folder of ebooks) — this is what enables Calibre-Web's metadata and OPDS features.
+2. Import/convert the existing ebook collection into the Calibre library structure.
+3. Expose Calibre-Web externally via Cloudflare Tunnel at `books.stephens-group.net` (rather than direct port forwarding) so it's reachable from the Kindle without opening ports on the router.
+4. On the Kindle: confirm jailbreak + KOReader are functioning, then add the Calibre-Web OPDS feed URL (`books.stephens-group.net/opds` or equivalent) as a catalog source inside KOReader.
+5. Test browsing/downloading a book directly on-device via the OPDS catalog before decommissioning Kavita.
+6. Decommission/stop the Kavita container once Calibre-Web + OPDS + KOReader path is confirmed working end-to-end.
+
+**Gotchas encountered:**
+- OPDS feeds require the underlying library to have clean, consistent metadata (author/series/title) to browse/search well — worth cleaning up metadata in Calibre itself before relying heavily on the OPDS feed.
+- Cloudflare Tunnel needed to be configured for this service specifically (see item below on Cloudflare Access) — don't expose it without auth in front of it.
+
+**Prevention:**
+- Any new ebook additions should go into the Calibre library (not a loose folder) so metadata and OPDS stay consistent.
+
+---
+
+## 6. Manga metadata enrichment: Komga + Komf
+
+**Context:**
+Manga collection (Berserk, Vinland Saga, Blame!, Pluto, Monster, Akira, Blade of the Immortal, Hellboy, Sin City, Walking Dead, Attack on Titan, and others) served via Komga, with Komf used to automate metadata/cover enrichment.
+
+**Symptom / motivation:**
+Manually tagging series metadata (covers, summaries, reading order) for a large and growing manga library is slow and error-prone.
+
+**Fix (setup used):**
+- Deploy Komga as the manga server (library scanning, reading, series organization).
+- Deploy Komf alongside it configured against Komga's API to automatically pull and apply metadata/cover art from configured metadata providers.
+- Verify folder structure matches what Komga expects per series (one folder per series, volumes/chapters named consistently) — Komf's matching accuracy depends heavily on clean, consistent naming, same underlying lesson as the ABS folder work in item #7.
+- Spot-check a handful of series after each Komf run before trusting it across the whole library, since mismatches (wrong series matched) are easier to catch early than after they've propagated.
+
+**Prevention:**
+- Keep new manga acquisitions named consistently at import time (series name + volume number) so Komf's auto-match stays reliable without manual correction.
+
+---
+
+## 7. Cloudflare Access for previously-unauthenticated exposed services
+
+**Context:**
+Several self-hosted services were reachable via Cloudflare Tunnel (public hostnames on `stephens-group.net`) but had no authentication layer in front of them — reachable by anyone who found/guessed the URL.
+
+**Symptom / risk:**
+Services with sensitive data or admin controls (media servers, dashboards, management UIs) were exposed to the public internet with only the app's own (sometimes weak or nonexistent) login, rather than a proper access-control layer.
+
+**Fix:**
+- Enabled Cloudflare Access (Zero Trust) in front of the exposed hostnames rather than relying on the app's own auth.
+- Created Access policies per-hostname (or per-group of hostnames) requiring authentication (e.g., email OTP or identity provider login) before Cloudflare will even proxy the request through to the tunnel/origin.
+- Verified that services meant to stay fully public (e.g., an OPDS feed a Kindle needs to reach without an interactive login step) were either excluded from the Access policy or handled with a service-token/bypass approach appropriate to non-interactive clients, so device-based feeds didn't break.
+- Tested from an unauthenticated browser/session to confirm Access actually blocks the request before reaching the origin, not just hides a login page.
+
+**Prevention:**
+- Treat "exposed via Cloudflare Tunnel" and "protected" as two separate steps going forward — any new hostname added to the tunnel gets an explicit decision about whether it needs an Access policy before it's considered done, not exposed by default.
+
+---
+
+## 8. GBA ROM organizer script
+
+**Context:**
+A folder of GBA ROM files with inconsistent naming (region tags, revision numbers, abbreviations, mixed casing) needed to be organized into a clean, consistently-named, browsable structure.
+
+**Symptom:**
+Frontend/emulator library scanners either failed to match box art and metadata, or listed the same game multiple times under slightly different filenames (different region tags, rev numbers, etc.).
+
+**Fix (approach used):**
+- Wrote a script to walk the ROM folder and normalize filenames to a single consistent convention (consistent title casing, standardized region/revision tag placement, stripped redundant tags).
+- Grouped/deduplicated near-identical entries (same game, different region dump) where only one copy was actually wanted, flagging ambiguous cases for manual review rather than silently deleting.
+- Ran against a test copy first, spot-checked results in the target frontend/emulator before running against the full ROM set.
+
+**Prevention:**
+- Apply the same naming convention to any newly added ROMs at import time rather than letting inconsistent naming creep back in.
+- Keep the script versioned here so the same normalization can be re-run if new inconsistencies show up.
+
+---
+
+## 9. Plex hardware transcoding + Radarr/Sonarr custom format scoring (legacy codec blocking)
+
+**Context:**
+Plex server handling a large library (~4,680 movies, 433 shows) needed reliable hardware transcoding, and Radarr/Sonarr needed to stop pulling releases encoded with legacy/inefficient codecs that caused transcoding problems or wasted storage.
+
+**Symptom:**
+Playback for certain files required CPU-based transcoding (high load, potential stuttering for remote/friend access) instead of hardware-accelerated transcoding; some downloaded releases used older codecs (e.g., legacy H.264 profiles or worse) that were larger and more transcode-hungry than necessary.
+
+**Fix:**
+- **Plex hardware transcoding:** Enabled and verified Intel QuickSync hardware transcoding in Plex settings, confirmed the UnRAID Docker container had proper GPU/iGPU passthrough configured (device mappings for `/dev/dri` or equivalent) so Plex could actually access QuickSync rather than falling back to software transcoding silently.
+- **Radarr/Sonarr custom format scoring:** Set up custom formats in Radarr and Sonarr to detect and penalize/block legacy codecs and undesirable encodes, scoring releases so preferred (modern, efficient codec) releases are picked over legacy ones automatically during the release selection process, rather than needing manual review per download.
+
+**Verification:**
+- Confirmed hardware transcoding is actually being used (not falling back to software) by checking Plex's active transcoder session details during playback of a file that requires transcoding.
+- Spot-checked new grabs in Radarr/Sonarr against the custom format scores to confirm legacy-codec releases were being deprioritized/rejected as expected.
+
+**Prevention:**
+- Periodically re-check custom format scores against new release-group naming conventions, since format-detection rules can drift out of date as scene/P2P release naming conventions change over time.
+- Confirm GPU passthrough survives UnRAID updates/container recreation — this is a common thing to silently break after an update.
+
+---
