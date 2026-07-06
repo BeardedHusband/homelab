@@ -61,6 +61,77 @@ Known regression in the `mt7921e` driver introduced in kernel 6.14+ affecting st
 
 ---
 
+## 3. Mousehole + qBittorrent VPN IP Mismatch (MAM)
+
+**Problem:**
+
+MyAnonamouse (MAM) flagged my account for connecting from two different IPs — my home IP from browsing and a PIA VPN IP from qBittorrent seeding. MAM requires a registered "seedbox" session to allow this, kept updated via their Dynamic Seedbox API. Mousehole automates this, but must run on qBittorrent's network namespace to detect the correct VPN IP. PIA also periodically rotates VPN IPs, breaking the MAM session.
+
+**Diagnosis:**
+
+Mousehole was running on Docker's default bridge network, causing it to report the home IP instead of the PIA VPN IP. Confirmed by comparing:
+
+```bash
+docker exec Mousehole curl -s ifconfig.me
+docker exec binhex-qbittorrentvpn curl -s ifconfig.me
+```
+
+When IPs differ, Mousehole is on the wrong network. MAM logs showed `Invalid session - IP mismatch` or `ASN mismatch` errors.
+
+Additional issues encountered:
+- PIA dropped `ca-ontario.privacy.network` from port forwarding support, preventing qBittorrent from launching
+- Mousehole container updates reset environment variables, breaking the auth config
+- MAM session created from browser locked to home ASN instead of PIA ASN
+
+**Resolution:**
+
+Mousehole must share qBittorrent's network namespace using `--network=container:binhex-qbittorrentvpn`. This cannot be set via UnRAID's Docker GUI and requires a terminal script.
+
+Rebuild script saved at `/mnt/user/appdata/mousehole/rebuild-mousehole.sh`:
+
+```bash
+#!/bin/bash
+docker stop Mousehole 2>/dev/null
+docker rm Mousehole 2>/dev/null
+
+docker run -d \
+  --name Mousehole \
+  --network=container:binhex-qbittorrentvpn \
+  --restart unless-stopped \
+  -v /mnt/user/appdata/mousehole/data:/srv/mousehole \
+  -e MOUSEHOLE_PORT=5010 \
+  -e MOUSEHOLE_STATE_DIR_PATH=/srv/mousehole \
+  -e MOUSEHOLE_CHECK_INTERVAL_SECONDS=300 \
+  -e MOUSEHOLE_STALE_RESPONSE_SECONDS=86400 \
+  -e TZ=America/Chicago \
+  -e MOUSEHOLE_USER_AGENT=mousehole-by-timtimtim \
+  -e MOUSEHOLE_INSECURE_ALLOW_NO_AUTH=true \
+  tmmrtn/mousehole:latest
+```
+
+MAM session cookie stored and updated via:
+
+```bash
+cat > /mnt/user/appdata/mousehole/data/state.json << 'EOF'
+{
+  "currentCookie": "YOUR_COOKIE_HERE"
+}
+EOF
+docker restart Mousehole
+```
+
+MAM session must be created with the PIA IP entered manually and set to **ASN locked** (not IP locked) to survive IP rotations within PIA's network.
+
+If PIA drops port forwarding support for an endpoint, change `VPN_REMOTE_SERVER` in the container to a supported endpoint such as `ca-toronto.privacy.network`.
+
+**Lessons Learned:**
+
+- Always create MAM sessions using ASN locking, not IP locking, to survive VPN IP rotations
+- Mousehole must run on the VPN container's network namespace, not the Docker bridge
+- Store the rebuild script in appdata so it survives and is easy to find
+- After any qBittorrent container update, verify Mousehole is still seeing the PIA IP
+- Check `/tmp/getvpnport` exists before assuming qBittorrent is fully started; its absence means port forwarding failed
+
 ## Template for new entries
 
 ```
