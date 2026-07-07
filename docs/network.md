@@ -1,171 +1,232 @@
-# Network Overview
+# Network Architecture
 
-This document describes the physical and logical network architecture of my homelab, including infrastructure, management devices, and self-hosted services.
+This document describes the physical and logical network architecture of my homelab, including infrastructure, management systems, networking decisions, and remote access strategy.
 
-## Internet
+---
+
+# Design Goals
+
+This network was built with the following objectives:
+
+- Reliable self-hosted services
+- Secure remote administration
+- High-speed local file transfers
+- Simple management
+- Practical systems administration experience
+- Minimal public attack surface
+- Easy disaster recovery
+
+---
+
+# Physical Topology
 
 ```text
-Internet
-    │
-White River Connect Fiber
-    │
-Netgear BE9300 Router
-    │
-2.5 GbE Switch
-    ├───────────────┐
-    │               │
-Unraid Server   Linux Mint Laptop
-                    │
-             Pi-hole / WireGuard
-                    │
-               MoCA Backbone
-                    │
-             Gaming Desktop
-                    │
-       Steam Deck (Moonlight)
+                      Internet
+                          │
+              White River Connect Fiber
+                          │
+                  Netgear BE9300 Router
+                          │
+                    2.5 GbE Switch
+          ┌───────────────┴───────────────┐
+          │                               │
+     Unraid Server                Linux Mint Server
+          │                               │
+          │                     Pi-hole / Unbound
+          │                     WireGuard VPN
+          │
+     MoCA Backbone
+          │
+     Gaming Desktop
+          │
+      Steam Deck
 ```
 
 ---
 
-## Technical Skills
+# Core Infrastructure
 
-**Operating Systems**
-- Linux Mint
-- Unraid
-- Windows 11
+| Device | Purpose |
+|----------|----------|
+| Netgear BE9300 | Primary router |
+| 2.5 GbE Switch | High-speed LAN connectivity |
+| Unraid Server | Primary virtualization and storage platform |
+| Linux Mint Server | Network services, DNS, VPN, remote management |
+| Gaming Desktop | Primary workstation |
+| Steam Deck | Remote game streaming client |
 
-**Networking**
-- Static IP addressing
-- WireGuard VPN
-- Pi-hole DNS
-- Cloudflare Tunnel
-- MoCA
+---
+
+# IP Addressing
+
+Static IPs are assigned to all infrastructure devices to simplify management and ensure services remain accessible after reboots.
+
+| Device | Address |
+|----------|----------|
+| Router | 192.168.1.254 |
+| Linux Mint | 192.168.1.20 |
+| Unraid | 192.168.1.66 |
+| Gaming Desktop | 192.168.1.125 |
+
+---
+
+# Networking Services
+
+## Pi-hole
+
+Purpose
+
+- Network-wide DNS filtering
+- Centralized DNS management
+- Local DNS resolution
+
+Why
+
+Provides centralized DNS administration while reducing unwanted advertising and telemetry across the network.
+
+---
+
+## Unbound
+
+Purpose
+
+Recursive DNS resolver.
+
+Why
+
+Removes dependency on third-party upstream DNS providers and improves privacy.
+
+---
+
+## WireGuard
+
+Purpose
+
+Secure VPN access to the home network.
+
+Why
+
+Allows encrypted remote administration without exposing management interfaces directly to the Internet.
+
+Primary uses:
+
 - SSH
-
-**Virtualization & Containers**
-- Docker
-- Docker Compose
-- Container troubleshooting
-
-**Storage**
-- SMB Shares
-- RAID/Parity
-- Backup & Restore
-- UPS monitoring
-
-**Monitoring**
-- Grafana
-- Plex Dash
-- System monitoring
-
-## Infrastructure
-
-- 2.5 GbE LAN
-- 2.5 GbE Switch
-- MoCA Backbone
-- Static IP Assignments
-- Pi-hole DNS
-- WireGuard VPN
-- Cloudflare Tunnel
+- NoMachine
+- Unraid
+- Internal web interfaces
 
 ---
 
-## Core Devices
+## Cloudflare Tunnel
 
-| Device | Address | Purpose |
-|---------|---------|---------|
-| Netgear BE9300 | 192.168.1.254 | Router |
-| Unraid Server | 192.168.1.66 | Primary server |
-| Linux Mint Laptop | 192.168.1.20 | Headless Linux management server |
-| Gaming Desktop | 192.168.1.125 | Primary workstation |
+Purpose
 
----
+Securely publish selected services without opening inbound firewall ports.
 
-## Management
+Why
 
-### Linux Mint Laptop
-
-- Headless
-- NoMachine remote desktop
-- SSH administration
-- Hosts Pi-hole
-- Hosts WireGuard
-
-### Unraid Server
-
-- Web GUI
-- SSH access
-- Docker host
-- UPS monitored
+Cloudflare Tunnel allows remote access while significantly reducing the public attack surface compared to traditional port forwarding.
 
 ---
 
-## Self Hosted Services
+# Infrastructure Services
+
+Primary Docker services currently include:
 
 | Service | Purpose |
-|---------|---------|
+|----------|----------|
 | Plex | Media streaming |
 | Audiobookshelf | Audiobook server |
-| Nextcloud | Personal cloud |
+| Nextcloud | Personal cloud storage |
 | Vaultwarden | Password management |
 | Immich | Photo backup |
-| Pi-hole | DNS filtering |
-| WireGuard | Remote VPN |
-| Grafana | Monitoring |
+| Grafana | Infrastructure monitoring |
 | Nginx Proxy Manager | Reverse proxy |
-| Cloudflare Tunnel | Secure remote access |
+| PostgreSQL | Database services |
+| MariaDB | Database services |
+| Matrix Synapse | Messaging |
 
 ---
 
-## Current Scale
+# Storage
 
-- 56 TB storage
-- 23 Plex users
-- 30+ Docker containers
-- 2.5 GbE LAN
-- Static IP addressing
+Current storage platform:
+
+- ~56 TB protected storage
+- Dual parity
+- 2 TB NVMe cache
+- SMB shares
+- Docker appdata
 - Daily backups
-- UPS monitoring
-- Remote VPN access
+- SMART monitoring
+- UPS battery backup
 
 ---
 
-## Docker
+# Remote Administration
 
-The Docker environment currently hosts more than 30 containers supporting:
+Infrastructure is managed remotely using:
 
-- Media streaming
-- Media automation
-- Monitoring
-- Networking
-- Databases
-- Password management
-- Personal cloud
-- Reverse proxy
+- SSH
+- NoMachine
+- WireGuard VPN
+- Unraid Web UI
+- Cloudflare Tunnel (selected services only)
 
-Major containers include:
+Management interfaces are not exposed directly to the Internet.
 
-- Plex
-- Audiobookshelf
-- Sonarr
-- Radarr
-- Bazarr
-- SABnzbd
-- qBittorrent
-- Nextcloud
-- Vaultwarden
-- Immich
+---
+
+# Monitoring
+
+Infrastructure health is monitored using:
+
 - Grafana
-- PostgreSQL
-- MariaDB
-- Matrix Synapse
+- Plex Dash
+- SMART monitoring
+- UPS monitoring
+- Docker status
+- System resource utilization
 
 ---
 
-## Documentation
+# Security Design
 
-- 📄 Network Overview
-- 📄 Troubleshooting Log
-- 📄 Docker
-- 📄 Services
-- 📄 Storage
+Current security practices include:
+
+- Static IP assignments
+- WireGuard VPN
+- Cloudflare Tunnel
+- Cloudflare Access
+- Pi-hole DNS
+- Password management with Vaultwarden
+- Regular Docker updates
+- Daily backups
+
+Future improvements:
+
+- VLAN segmentation
+- Windows Active Directory lab
+- Centralized authentication
+- Infrastructure as Code
+- Enhanced monitoring
+
+---
+
+# Current Scale
+
+- ~56 TB protected storage
+- 30–40 Docker containers
+- 23 active Plex users
+- Multiple self-hosted services
+- 2.5 GbE LAN
+- Secure remote administration
+- Daily operational use
+
+---
+
+# Design Philosophy
+
+This network is designed to provide practical systems administration experience through daily operation and maintenance.
+
+Rather than building isolated demonstrations, services are deployed for real-world use. Problems are documented, root causes investigated, and recovery procedures recorded to continuously improve both the infrastructure and my understanding of Linux, networking, and systems administration.
