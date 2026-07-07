@@ -303,6 +303,165 @@ turn_allow_guests: false
 
 ---
 
+## 11. Wake-on-LAN not working remotely (WireGuard + iPhone)
+
+**Symptom:**
+WOL works from Xbox on LAN but fails to wake gaming PC when triggered remotely over WireGuard from iPhone. No response, PC stays off.
+
+**Diagnosis steps:**
+1. Confirm WOL works locally first — if Xbox on LAN can wake PC, hardware/BIOS config is correct.
+2. Confirm WireGuard tunnel is actually up on iPhone — verify you can reach other LAN resources (UnRAID web UI, PiHole, etc.) before blaming WOL.
+3. Understand the architectural reason: WOL magic packets are Layer 2 LAN broadcasts. They cannot be sent directly from a remote WireGuard client across the tunnel — a device physically on the LAN must broadcast the packet.
+
+**Root cause:**
+WOL magic packets are subnet broadcasts and cannot originate from outside the LAN, even over a routed VPN tunnel. The iPhone on WireGuard is logically "outside" the LAN from a broadcast perspective. The Xbox works because it is physically on the same Layer 2 segment.
+
+**Fix:**
+
+**Option A — etherwake via UnRAID SSH (immediate, no setup):**
+SSH into UnRAID via Termius while on WireGuard, then:
+```bash
+etherwake AA:BB:CC:DD:EE:FF
+```
+`etherwake` is built into UnRAID — no install needed. Save as a Termius snippet for one-tap access.
+
+**Option B — WOL Docker container (web UI, no SSH needed):**
+Install `ghcr.io/trugamr/wol:latest` on UnRAID via Community Apps.
+
+Create config file *before* starting the container (container will fail with "is a directory" error if this file doesn't exist):
+```bash
+rm -rf /mnt/user/appdata/wol/config.yaml
+nano /mnt/user/appdata/wol/config.yaml
+```
+
+Paste config:
+```yaml
+machines:
+  - name: gaming desktop
+    mac: "AA:BB:CC:DD:EE:FF"
+    ip: "192.168.1.x"
+
+server:
+  listen: ":7777"
+
+ping:
+  privileged: false
+```
+
+In UnRAID Docker template, verify:
+- Volume mapping host path: `/mnt/user/appdata/wol/config.yaml`
+- Container path: `/etc/wol/config.yaml`
+- Network type: Host
+- Remove any auto-added TailScale Fallback State Directory entry pointing at `/etc/wol/config.yaml` — this conflicts
+
+Access web UI at `http://192.168.1.66:7777` over WireGuard to wake PC without SSH.
+
+**Verification:**
+Shut gaming PC down → connect WireGuard on iPhone (confirm tunnel is up by reaching UnRAID) → send WOL via etherwake or web UI → wait 45–60 seconds → connect Moonlight/Apollo.
+
+**Prevention:**
+- Always-on LAN device (UnRAID) is the correct place to host WOL functionality, not the remote client
+- The WOL container config file must exist on the host before container start — UnRAID will create a directory instead of a file if the path doesn't exist, causing startup failure
+- Remove auto-added Community Apps TailScale fields from the container template if not using Tailscale — they can conflict with volume mappings
+
+---
+
+## 12. WOL Docker container fails to start — "is a directory" error
+
+**Symptom:**
+WOL container repeatedly crashes on start. Logs show:
+```
+Error: failed to load config file: read /etc/wol/config.yaml: is a directory
+```
+
+**Diagnosis steps:**
+1. Check container logs:
+```bash
+docker logs WOL
+```
+2. Confirm the issue — check what `/mnt/user/appdata/wol/config.yaml` actually is:
+```bash
+ls -la /mnt/user/appdata/wol/
+```
+If `config.yaml` shows as a directory (`drwxr-xr-x`) rather than a file (`-rw-r--r--`), this is the cause.
+
+**Root cause:**
+When the container volume mapping path doesn't exist at container creation time, Docker creates the target as a directory rather than a file. The WOL container then tries to read a directory as a config file and fails.
+
+**Fix:**
+```bash
+rm -rf /mnt/user/appdata/wol/config.yaml
+nano /mnt/user/appdata/wol/config.yaml
+```
+
+Paste valid config, save (Ctrl+X → Y → Enter), then restart container. File must exist and be a valid YAML file before container starts.
+
+**Prevention:**
+- Create the config file manually before installing/starting any container that requires a config file at a specific path
+- Verify with `ls -la` that the path is a file not a directory before starting the container
+- The Community Apps template warning at the top of the WOL template states this explicitly — read it before applying
+
+---
+
+## 13. NoMachine Inspiron going to sleep / unreachable without physical interaction
+
+**Symptom:**
+Inspiron drops off the network and becomes unreachable via NoMachine. Requires physically opening the lid and pressing power button to wake. Not fully off — just suspended/sleeping.
+
+**Diagnosis steps:**
+1. Confirm it's sleep not shutdown — if it responds immediately after physical interaction it's suspend, not a crash or power failure.
+2. Check current logind config:
+```bash
+cat /etc/systemd/logind.conf | grep -i handle
+```
+3. Check power manager settings in Mint GUI — System Settings → Power Manager.
+
+**Root cause:**
+Linux Mint default power management suspends the system on lid close and after idle timeout. On a headless/always-on machine this is never appropriate.
+
+**Fix:**
+```bash
+sudo nano /etc/systemd/logind.conf
+```
+
+Set (uncomment if prefixed with `#`):
+```
+HandleLidSwitch=ignore
+HandleLidSwitchExternalPower=ignore
+HandleSuspendKey=ignore
+IdleAction=ignore
+```
+
+Then apply:
+```bash
+sudo systemctl restart systemd-logind
+```
+
+Also set all sleep/suspend/hibernate options to "Never" in Mint GUI Power Manager for both battery and plugged-in profiles. Both changes are needed — Mint's power manager can override logind settings.
+
+**Verification:**
+```bash
+sudo reboot
+```
+Attempt NoMachine connection from another device without physically touching the Inspiron. If reachable within ~60 seconds of boot, fix is confirmed.
+
+**Prevention:**
+- Apply these settings immediately after OS install on any machine intended as a headless always-on appliance
+- Set all services to autostart via systemd at the same time:
+```bash
+sudo systemctl enable ssh
+sudo systemctl enable pihole-FTL
+sudo systemctl enable unbound
+sudo systemctl enable wg-quick@wg0
+```
+- Verify autostart with:
+```bash
+systemctl is-enabled pihole-FTL
+systemctl is-enabled unbound
+systemctl is-enabled wg-quick@wg0
+
+```
+
 ## Template for new entries
 
 ```
