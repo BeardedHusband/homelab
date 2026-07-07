@@ -847,6 +847,48 @@ Expect `ok`.
 
 ---
 
+## 18. NoMachine remote access white screen (dual monitor issue)
+
+**Symptom:**
+Remote access to a Windows desktop using NoMachine over WireGuard connects successfully, but the remote display is completely white. WireGuard tunnel connects, NoMachine connects to the desktop using the LAN IP, keyboard input works, Ctrl+Alt+Delete works, Task Manager can be opened — but the desktop itself stays entirely white. NoMachine only reports one monitor and monitor selection is greyed out.
+
+**Diagnosis steps:**
+
+1. Verify WireGuard connectivity and that NoMachine reaches the desktop's local IP — connection succeeds, confirming routing and the NoMachine server are both fine.
+
+2. Verify Windows is actually responding by sending Ctrl+Alt+Delete through NoMachine. Task Manager opens normally — confirms Windows isn't frozen and NoMachine input is functioning. The problem is isolated to display rendering only.
+
+3. Restart Windows Explorer (`explorer.exe`) — no change, screen stays white.
+
+4. Sign out and back into Windows — no change, still white.
+
+5. Disable NoMachine display acceleration on the host (`NoMachine → Settings → Performance → Use acceleration for display processing`, unchecked) — no change.
+
+6. Check monitor selection inside the connected session — display settings only show "Monitor 1" and selection is greyed out, suggesting NoMachine is attached to the physical console but can't capture the correct framebuffer.
+
+7. Test physical monitor configuration: disconnect one of the two physical monitors from the desktop, then immediately reconnect using NoMachine. **Desktop appears normally.** Issue confirmed.
+
+**Root cause:**
+The Windows desktop's dual-monitor configuration caused NoMachine to attach to an invalid or unusable framebuffer. The session itself was healthy the whole time (WireGuard worked, NoMachine worked, Windows accepted input) — only desktop rendering failed. Physically disconnecting one monitor forces Windows to rebuild the desktop compositor/framebuffer, which lets NoMachine capture the desktop correctly.
+
+**Fix:**
+
+Temporary/immediate fix:
+1. Disconnect one physical monitor.
+2. Wait a few seconds.
+3. Reconnect using NoMachine — display returns immediately.
+
+Also disable NoMachine display acceleration (`Settings → Performance → Use acceleration for display processing`, unchecked). This alone didn't resolve the issue, but it's worth leaving disabled for improved remote compatibility going forward.
+
+**Prevention:**
+- Disable Windows Fast Startup (`Control Panel → Power Options → Choose what the power buttons do → Change settings that are currently unavailable → Turn off Fast Startup`) — multi-monitor framebuffer state is more likely to get stuck across a Fast Startup "hybrid shutdown" than a full reboot.
+- Leave NoMachine display acceleration disabled by default on this host.
+- If the white screen returns: disconnect one monitor, reconnect with NoMachine. If that restores the desktop, it's the same multi-monitor display state issue recurring, not a new problem — no need to re-diagnose from scratch.
+
+**Recognizing this exact issue again:** white screen only, keyboard/Ctrl+Alt+Delete/Task Manager all work, Explorer restart doesn't help, sign out/in doesn't help, unplugging one monitor immediately restores the desktop.
+
+---
+
 ## Template for new entries
 
 ```
