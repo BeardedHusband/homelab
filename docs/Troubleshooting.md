@@ -31,33 +31,101 @@ Old hardware unreliable/underpowered for running Pi-hole + Unbound + WireGuard r
 
 **Gotchas encountered:**
 - Client WireGuard configs (phone, laptop, etc.) needed updated `Endpoint` and the new host's public key — old configs silently fail to connect rather than erroring clearly.
-- A Chromebook (CB315-4H, MAGMA board) was considered as an alternative host but set aside — ChromeOS/crostini limitations made it a worse fit than the Inspiron; returned to stock ChromeOS.
+- A Chromebook (CB315-4H, MAGMA board) was also considered as a host — see entry #15 for the full conversion process, which was ultimately carried out rather than staying on stock ChromeOS.
 
 **Prevention / future work:**
 - Raspberry Pi 4 is the planned long-term home for these services (lower power draw, dedicated single-purpose box). Migration steps above should transfer directly.
 
 ---
 
-## 2. Linux WiFi drops / regression on ASUS ROG Zephyrus G15 (MT7921 chipset)
+## 2. WiFi dead after kernel auto-upgrade — ASUS ROG Zephyrus G15 (MT7921 / mt76 driver)
 
 **Symptom:**
-WiFi (MediaTek MT7921 chipset) becomes unstable, drops, or fails to reconnect reliably after upgrading to kernel 6.14+.
+WiFi connects briefly after boot then drops entirely. `nmcli dev wifi list` returns empty (no networks visible at all). Interface shows as `DORMANT` in `ip link`. Rebooting restores WiFi temporarily but it dies again within minutes to an hour. Password-related errors are a red herring — the adapter isn't scanning at all.
 
 **Diagnosis steps:**
-1. Check kernel version: `uname -r`
-2. Check for MT7921-related errors in kernel log: `dmesg | grep -i mt7921` or `journalctl -k | grep -i mt7921`
-3. Check driver/firmware version in use vs. what's available: `dmesg | grep -i firmware`
+
+1. Confirm adapter is visible but dormant:
+```bash
+ip link show
+```
+Look for `wlp4s0` (or similar) with state `DORMANT` — means adapter is up but not functional.
+
+2. Confirm scan returns nothing:
+```bash
+nmcli dev wifi list
+sudo nmcli dev wifi rescan && nmcli dev wifi list
+```
+If both return only headers with no networks listed, it's a driver issue, not a password/SSID issue.
+
+3. Check which kernel is running:
+```bash
+uname -r
+```
+If 6.14+ is shown, this is the root cause.
+
+4. Check which MT76 modules are loaded:
+```bash
+lsmod | grep mt79
+```
+Expected output on affected kernels: `mt792x_lib`, `mt76_connac_lib`, `mt76`, `mac80211` — all loaded but driver in bad state.
+
+5. Confirm module name changed in 6.14+ (mt7921e no longer exists):
+```bash
+find /lib/modules/$(uname -r) -name "mt79*"
+```
+
+6. Attempt driver reload (temporary fix, will break again):
+```bash
+sudo modprobe -r mt76 mt76_connac_lib mt792x_lib
+sudo modprobe mt792x_lib mt76_connac_lib mt76
+sudo systemctl restart NetworkManager
+nmcli dev wifi list
+```
+Note: module unload will fail with "in use" errors because mac80211 holds the stack — a full reboot is cleaner than fighting the unload order.
+
+7. Check what kernel versions are installed:
+```bash
+apt list --installed | grep linux-image
+```
 
 **Root cause:**
-Known regression in the `mt7921e` driver introduced in kernel 6.14+ affecting stability on this chipset — not a hardware fault or misconfiguration.
+Linux Mint's HWE (Hardware Enablement) stack automatically upgraded the kernel from a stable version to 6.14 (and then 6.17) during a routine update. Kernel 6.14+ introduced a regression in the `mt76` driver stack (specifically the MT7921 chipset used in the G15's MediaTek WiFi card) that causes the driver to enter a bad state intermittently. The driver initializes on boot, works briefly, then dies. The module name also changed in 6.14+ — `mt7921e` no longer exists, replaced by `mt792x_lib`. The issue is not hardware, not password, not router-side — confirmed by the empty scan list and DORMANT interface state.
 
-**Fix (workarounds, pick based on distro):**
-- Pin/boot an older kernel known to work (pre-6.14) until upstream fixes land.
-- Check for and apply any backported firmware/driver fixes from your distro's kernel package updates.
-- Monitor the linux-wireless mailing list / kernel bugzilla for the specific regression fix landing, then update.
+**Fix:**
+
+Install kernel 6.8 (last known stable for MT7921):
+```bash
+sudo apt install linux-image-6.8.0-107-generic linux-headers-6.8.0-107-generic
+sudo update-grub
+```
+
+Reboot and select **Advanced options for Linux Mint → 6.8.0-107-generic** in GRUB.
+
+**Important:** First boot on 6.8 with NVIDIA drivers present may stall at a blinking cursor for 2–3 minutes. This is normal — wait it out. Do not hard-reboot during this window; it will complete.
+
+Once confirmed stable on 6.8, remove the broken kernels (must be booted into 6.8 first — removing the currently running kernel will prompt an abort warning):
+```bash
+sudo apt remove --purge linux-image-6.14.0-29-generic linux-image-6.14.0-37-generic linux-image-6.17.0-20-generic
+sudo apt remove --purge linux-headers-6.14.0-29-generic linux-headers-6.14.0-37-generic linux-headers-6.17.0-20-generic
+sudo apt autoremove
+sudo update-grub
+```
+
+Set 6.8 as default boot kernel in `/etc/default/grub`:
+```
+GRUB_DEFAULT="Advanced options for Linux Mint>Linux Mint, with Linux 6.8.0-107-generic"
+```
+Then:
+```bash
+sudo update-grub
+```
 
 **Prevention:**
-- Before doing a major kernel upgrade on this laptop specifically, check recent kernel changelogs / Arch or Ubuntu forums for MT7921 regression reports first.
+- Update Manager will continue offering kernel upgrades via the HWE stack. Do not install kernel updates without first checking whether the target version has MT7921 regressions reported on Ubuntu/Arch forums or the linux-wireless mailing list.
+- The Update Manager will show kernel updates as a lightning-bolt icon item. Uncheck or right-click → ignore any kernel update to 6.14+ until the MT76 regression is confirmed fixed upstream.
+- Before removing an old kernel, always verify the running kernel with `uname -r` — removing the currently booted kernel mid-session triggers an abort prompt and is safe to cancel.
+- If WiFi dies again on a future kernel, the fallback is: plug in ethernet → install 6.8 → reboot into it via GRUB Advanced options.
 
 ---
 
@@ -459,8 +527,10 @@ sudo systemctl enable wg-quick@wg0
 systemctl is-enabled pihole-FTL
 systemctl is-enabled unbound
 systemctl is-enabled wg-quick@wg0
-
 ```
+
+---
+
 ## 14. qBittorrent causing high CPU load / elevated UnRAID load average
 
 **Symptom:**
@@ -511,6 +581,101 @@ Restarted the `binhex-qbittorrentvpn` container to immediately drop load while d
 - The startup recheck spike is unavoidable with a large library — avoid unnecessary container restarts
 - To identify dead-weight public tracker torrents burning active slots: in qBittorrent WebUI enable the **Private** column (right-click any column header) and sort by it — non-private torrents with dead trackers (rarbg, etc.) can be safely paused or removed with no ratio risk
 - Alternatively use the left sidebar tracker groups to bulk-select and pause torrents by tracker domain
+
+---
+
+## 15. Chromebook → Linux Mint via MrChromebox UEFI Full ROM (Acer CB315-4H, MAGMA board)
+
+**Symptom / motivation:**
+Acer Chromebook 315 (CB315-4H, MAGMA board, Pentium Silver N6000, 128GB eMMC) repurposed from ChromeOS to Linux Mint 22 for use as a homelab dashboard / Moonlight streaming client.
+
+**Diagnosis steps:**
+
+1. Confirm board identity and UEFI Full ROM support via `chrome://system` in ChromeOS browser. Key fields:
+   - `CHROMEOS_FIRMWARE_VERSION`: `Google_Magolor.13606.710.0`
+   - `CHROMEOS_RELEASE_BOARD`: `dedede-signed-mp-v58keys`
+   - `HWID`: `MAGMA-QZPR C3B-F2F-E4E-L4R-Q9Y`
+   - `FREE_DISK_SPACE`: `93265756160` (~128GB eMMC confirmed)
+   - `bios_info → RO firmware`: `protected` (WP enabled, expected)
+   - `bios_info → Developer mode`: `not enabled` (expected)
+
+2. Cross-reference board against MrChromebox supported devices page — MAGMA (Dedede family, Jasper Lake) shows two green checkmarks: RW_LEGACY and UEFI Full ROM both supported. WP method listed as `CR50 (SuzyQ) | jumper`.
+
+3. Confirm CPU architecture is x86_64 (not ARM) — required for MrChromebox UEFI Full ROM:
+   From Crostini terminal:
+   ```bash
+   lscpu
+   ```
+   Confirms: `Architecture: x86_64`, `Model name: Intel(R) Pentium(R) Silver N6000 @ 1.10GHz`, `Virtualization: VT-x`
+
+**Root cause / context:**
+ChromeOS uses proprietary Google firmware instead of standard UEFI/BIOS. Installing Linux requires replacing this with a UEFI Full ROM via MrChromebox's firmware utility script. Hardware write protect must be disabled before flashing. For the MAGMA board, WP can be disabled via software (CR50) without opening the device — the physical jumper method is an alternative but was not needed here.
+
+**Fix:**
+
+**Step 1 — Enable Developer Mode:**
+- Power off → hold `Esc + Refresh + Power` → at recovery screen press `Ctrl + D` → confirm → wait for wipe/reboot (~10 min)
+- After reboot: press `Ctrl + D` at the "OS verification is OFF" screen to boot into ChromeOS
+
+**Step 2 — Get a root shell:**
+- At ChromeOS login screen, press `Ctrl + Alt + F2`
+- Login as `chronos` (no password)
+- This bypasses the `no new privileges` restriction encountered when using Crosh (`Ctrl + Alt + T` → `shell` → `sudo`) in some configurations
+
+**Step 3 — Run MrChromebox firmware utility script:**
+```bash
+cd; curl -LOf https://mrchromebox.tech/firmware-util.sh && sudo bash firmware-util.sh
+```
+
+- Script detects software WP enabled and prompts to disable it — press `Y` then Enter
+- Device reboots, re-run the same command after reboot
+- Select **Install/Update UEFI (Full ROM) Firmware** from the menu
+- When prompted to create firmware backup: press `Y`, select USB device (PNY USB 2.0 FD, 28.9GB listed as device `1`)
+- Backup saved as `stock-firmware-MAGMA-20260415.rom` — copied off USB to NAS before proceeding
+- Script downloads `coreboot_edk2-magolor-mrchromebox_20260409.rom`, persists HWID, extracts VPD, disables software WP, flashes Full ROM
+- Confirms: `Full ROM firmware successfully installed/updated.`
+- Power off using the script's menu option — do not reboot immediately
+
+**Step 4 — Install Linux Mint:**
+
+Boot from Linux Mint USB. Installer fails twice before successful install:
+
+*Error 1 — GRUB install fatal error:*
+Installer defaulted to wrong target device for bootloader. Fix: use manual partitioning ("Something else").
+
+*Error 2 — `ubi-partman` crashed with exit code 10:*
+Partition table on eMMC was in a bad state from the failed install attempt. Fix — wipe the disk from terminal in the live environment:
+```bash
+sudo umount /dev/mmcblk1* 2>/dev/null
+sudo swapoff -a
+sudo wipefs -a /dev/mmcblk1
+sudo sgdisk --zap-all /dev/mmcblk1
+```
+
+*Successful install — manual partitioning ("Something else"):*
+
+| Partition | Device | Type | Mount | Size |
+|---|---|---|---|---|
+| EFI | `/dev/mmcblk1p1` | EFI System Partition | — | 512 MB |
+| Root | `/dev/mmcblk1p2` | ext4 | `/` | remainder (~124 GB) |
+
+Set **Device for boot loader installation** to `/dev/mmcblk1` (not a partition — the whole disk).
+
+Proceed through installer normally. On completion, remove USB when prompted and reboot.
+
+**Verification:**
+System boots directly into Linux Mint. No GRUB issues. WiFi connects. Updates applied via Update Manager.
+
+**Prevention:**
+- Always use **Something else** (manual partitioning) when installing Linux on Chromebook eMMC — the automatic partitioner frequently targets the wrong bootloader device or produces exit code 10 errors on eMMC
+- Run `wipefs` and `sgdisk --zap-all` on the eMMC before any install attempt, especially after a failed install
+- Set bootloader device explicitly to the whole disk (`/dev/mmcblk1`) not a partition
+- Firmware backup (`stock-firmware-MAGMA-YYYYMMDD.rom`) should be saved to NAS or secondary storage immediately — required if ever reverting to ChromeOS or recovering from a bad flash
+- First boot after MrChromebox UEFI flash may take 30+ seconds with a black screen — this is normal, do not hard-reboot
+- The `chronos` shell method (`Ctrl + Alt + F2` at login screen) is more reliable than Crosh for running the firmware script — avoids the `no new privileges` flag issue encountered in Crosh shell with some account configurations
+- After install, disable suspend-on-lid-close if using as a clamshell/kiosk device (see entry #13)
+
+---
 
 ## Template for new entries
 
