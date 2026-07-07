@@ -461,6 +461,56 @@ systemctl is-enabled unbound
 systemctl is-enabled wg-quick@wg0
 
 ```
+## 14. qBittorrent causing high CPU load / elevated UnRAID load average
+
+**Symptom:**
+UnRAID dashboard shows sustained high CPU load (load average ~18 on a 20-thread i7-12700K). Individual CPU threads hitting 80-89% in the UnRAID dashboard graph. Server feels sluggish. No obvious cause from the dashboard alone.
+
+**Diagnosis steps:**
+1. Check UnRAID dashboard CPU graph for which specific threads are pegged — look for sustained 80%+ on individual cores.
+2. Run `htop` in UnRAID terminal, press `P` to sort by CPU:
+```bash
+htop
+```
+3. If `htop` is interrupted (SIGINT), fall back to docker stats snapshot:
+```bash
+docker stats --no-stream
+```
+4. Identify the offending container by CPU% column. In this case `binhex-qbittorrentvpn` was consuming ~43.7% CPU sustained.
+5. Cross-reference outbound traffic on the UnRAID dashboard — high outbound (108 Mbps in this case) alongside high CPU confirms active torrent swarm activity, not a runaway process.
+
+**Root cause:**
+qBittorrent was running with uncapped connection limits managing 1721 simultaneously active torrents across a library of 1765 total. Default/uncapped settings were:
+- Global max connections: 1000
+- Max connections per torrent: 100
+- Global max upload slots: 500
+- Max upload slots per torrent: 20
+- Max active torrents: 200
+
+With 1721 active torrents competing for those slots, qBittorrent was maintaining thousands of simultaneous connection states, saturating CPU. Additionally, on every restart qBittorrent rechecks/hashes all torrents for integrity — with 1765 torrents this produced a sustained 43%+ CPU spike lasting the duration of the recheck.
+
+**Fix:**
+Restarted the `binhex-qbittorrentvpn` container to immediately drop load while diagnosing. Then applied the following limits in qBittorrent WebUI under Tools → Options:
+
+**Connection tab:**
+- Global max connections: 300–400
+- Max connections per torrent: 20–30
+- Global max upload slots: 100–150
+- Max upload slots per torrent: 4–6
+
+**BitTorrent tab:**
+- Max active downloads: 10
+- Max active uploads: 30–40
+- Max active torrents: 150
+- Inactive seeding time limit: 60–120 minutes (down from 1440)
+
+**Note on private trackers:** These limits are safe for H&R compliance — ratio requirements are satisfied by upload volume and seeding time, not connection count. 4–6 upload slots per torrent is sufficient to satisfy H&R requirements on any private tracker.
+
+**Prevention:**
+- Cap connection limits immediately after any fresh qBittorrent install/container deployment — defaults are tuned for a small library, not 1700+ torrents
+- The startup recheck spike is unavoidable with a large library — avoid unnecessary container restarts
+- To identify dead-weight public tracker torrents burning active slots: in qBittorrent WebUI enable the **Private** column (right-click any column header) and sort by it — non-private torrents with dead trackers (rarbg, etc.) can be safely paused or removed with no ratio risk
+- Alternatively use the left sidebar tracker groups to bulk-select and pause torrents by tracker domain
 
 ## Template for new entries
 
