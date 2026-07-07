@@ -110,6 +110,16 @@ Documentation includes:
 
 ---
 
+## Network Architecture
+
+The following diagram illustrates the physical layout of the homelab infrastructure.
+
+![Physical Network](diagrams/physical-network.png)
+
+For more information see:
+
+- [Network Documentation](docs/network.md)
+
 # Documentation
 
 ## Repository Contents
