@@ -677,6 +677,176 @@ System boots directly into Linux Mint. No GRUB issues. WiFi connects. Updates ap
 
 ---
 
+## 16. Moonlight remote streaming works on PC but not iPhone (Apollo + Cloudflare)
+
+**Symptom:**
+Moonlight remote streaming works from a Windows laptop using `stream.stephens-group.net`. iPhone is already paired locally and shows the saved Apollo host. Attempting to manually add `stream.stephens-group.net` or `stream.stephens-group.net:47989` on iOS displays: "Moonlight only supports adding PCs on your local network on iOS." Apollo host shows a warning icon when away from home and will not connect over cellular.
+
+**Diagnosis steps:**
+
+1. Verify DNS resolves correctly:
+```bash
+ping stream.stephens-group.net
+```
+Successful replies confirm the Cloudflare DNS record is correct and the hostname resolves to the public IP.
+
+2. Verify Apollo is advertising the correct remote address — open Moonlight on Windows and view Details. Expected values:
+```
+Active Address: stream.stephens-group.net:47989
+Remote Address: <public-ip>:47989
+Pair State: Paired
+Status: Online
+HTTPS Port: 47984
+```
+If present, Apollo has learned the external address correctly.
+
+3. Verify port forwarding using `https://canyouseeme.org` — test ports `47984`, `47989`, `48010`. Expect "Success" on each.
+
+4. Check for VPN on the host PC. The host PC had a VPN enabled — after disabling it, Apollo immediately became reachable remotely.
+
+5. Confirm Cloudflare configuration: A Record, DNS Only (grey cloud). Do **not** proxy Moonlight traffic through Cloudflare.
+
+6. Test another remote client — Windows laptop successfully connected remotely using `stream.stephens-group.net`, confirming DNS, port forwarding, Apollo, and router configuration are all functioning correctly.
+
+**Root cause:**
+
+*Primary issue:* A VPN was active on the host PC. The VPN changed routing, preventing Apollo from responding correctly to incoming Moonlight connections.
+
+*Remaining iOS limitation:* Moonlight on iOS does not allow manually adding remote hosts. Attempting to manually add `stream.stephens-group.net` (with or without a port) always results in the "only supports adding PCs on your local network" message. This is expected behavior — the existing paired host must be used instead of adding a new one.
+
+**Fix:**
+
+- **Disable VPN on the host PC.** After disabling, restart Apollo and retry the remote connection.
+
+- **Verify required ports are forwarded to the gaming PC:**
+
+| Protocol | Port |
+|----------|------|
+| TCP | 47984 |
+| TCP | 47989 |
+| TCP | 47990 (Web UI) |
+| TCP | 48010 |
+| UDP | 47998–48000 |
+
+- **Configure Cloudflare:** create `stream.stephens-group.net` pointed at the public IP using DNS Only (grey cloud). Do not enable the Cloudflare proxy (orange cloud).
+
+- **Pair locally once:** pair the iPhone while connected to the home LAN. Do not attempt to manually add the remote hostname later — use the existing Apollo entry, which will pick up the remote address automatically once the above is fixed.
+
+**Prevention:**
+- Do not leave a VPN enabled on the gaming PC when using Apollo/Moonlight directly.
+- Verify external connectivity with `ping stream.stephens-group.net` and confirm TCP ports via `https://canyouseeme.org` after any router or Apollo config change.
+- Use Cloudflare only as DNS (grey cloud) for this hostname — never proxy Moonlight traffic through Cloudflare.
+- Remember that iOS Moonlight cannot manually add remote hosts; remote access relies on the host already being paired locally.
+- If direct cellular connections remain unreliable due to carrier NAT or UDP restrictions, use WireGuard as a fallback when away from home.
+
+---
+
+## 17. Plex database corruption recovery (Unraid + binhex-plex)
+
+**Symptom:**
+Plex iOS app repeatedly displayed a "Server is corrupt" notification (typically in the morning). Plex Media Server continued to function normally despite the warning. No obvious missing movies or TV shows due to the size of the library. Server had previously created `com.plexapp.plugins.library.db.broken.2025-08-11-1301`, indicating Plex had already detected a corrupted database in the past.
+
+**Diagnosis steps:**
+
+1. SSH into the Unraid server:
+```bash
+ssh root@<UNRAID_IP>
+```
+
+2. Navigate to the Plex database directory:
+```bash
+cd "/mnt/user/appdata/binhex-plex/Plex Media Server/Plug-in Support/Databases"
+```
+
+3. Verify database files exist:
+```bash
+ls
+```
+Expected to see files similar to `com.plexapp.plugins.library.db`, dated `.db-YYYY-MM-DD` backups, `.db-wal`, `.db-shm`, and any prior `.db.broken.*` files.
+
+4. Initial integrity check using the system SQLite — **fails, but not meaningfully**:
+```bash
+sqlite3 com.plexapp.plugins.library.db "PRAGMA integrity_check;"
+```
+Result: `Error: in prepare, unknown tokenizer: collating` — this is **not** database corruption, it just means the Unraid SQLite version doesn't understand Plex's custom tokenizer.
+
+5. Attempt using the container's sqlite3 — same error, still the wrong SQLite version:
+```bash
+docker exec -it binhex-plex sqlite3 "/config/Plex Media Server/Plug-in Support/Databases/com.plexapp.plugins.library.db" "PRAGMA integrity_check;"
+```
+
+6. Use Plex's bundled SQLite instead — this is the one that actually works:
+```bash
+docker exec -it binhex-plex "/usr/lib/plexmediaserver/Plex SQLite" "/config/Plex Media Server/Plug-in Support/Databases/com.plexapp.plugins.library.db" "PRAGMA integrity_check;"
+```
+Result: `*** in database main *** On tree page 1084014 cell 8: Rowid 1546754 out of order` — this confirms real database corruption.
+
+7. Test the newest backup **before** restoring it:
+```bash
+docker exec -it binhex-plex "/usr/lib/plexmediaserver/Plex SQLite" "/config/Plex Media Server/Plug-in Support/Databases/com.plexapp.plugins.library.db-2026-03-23" "PRAGMA integrity_check;"
+```
+Result: `ok` — newest automatic backup confirmed healthy.
+
+**Root cause:**
+The active Plex SQLite database had become corrupted. Symptoms were minor enough that Plex continued operating normally, but the iOS app correctly detected the corruption and repeatedly displayed a warning. The built-in automatic backup from 2026-03-23 was unaffected and passed integrity verification.
+
+**Fix:**
+
+Stop Plex:
+```bash
+docker stop binhex-plex
+```
+
+Navigate to the database directory:
+```bash
+cd "/mnt/user/appdata/binhex-plex/Plex Media Server/Plug-in Support/Databases"
+```
+
+Back up the current corrupted database (and WAL/SHM if present):
+```bash
+cp com.plexapp.plugins.library.db com.plexapp.plugins.library.db.corrupt-$(date +%F-%H%M)
+cp com.plexapp.plugins.library.db-wal com.plexapp.plugins.library.db-wal.corrupt-$(date +%F-%H%M) 2>/dev/null
+cp com.plexapp.plugins.library.db-shm com.plexapp.plugins.library.db-shm.corrupt-$(date +%F-%H%M) 2>/dev/null
+```
+
+Restore the clean backup:
+```bash
+cp com.plexapp.plugins.library.db-2026-03-23 com.plexapp.plugins.library.db
+```
+
+Remove stale WAL and SHM files (they belong to the corrupted state, not the restored backup):
+```bash
+rm -f com.plexapp.plugins.library.db-wal com.plexapp.plugins.library.db-shm
+```
+
+Start Plex:
+```bash
+docker start binhex-plex
+```
+
+Verify startup:
+```bash
+docker logs --tail=50 binhex-plex
+```
+A `Critical: libusb_init failed` message is expected/harmless when no USB tuner is in use — don't chase it.
+
+Verify the repaired database:
+```bash
+docker exec -it binhex-plex "/usr/lib/plexmediaserver/Plex SQLite" "/config/Plex Media Server/Plug-in Support/Databases/com.plexapp.plugins.library.db" "PRAGMA integrity_check;"
+```
+Expect `ok`.
+
+**Prevention:**
+- Always use Plex's bundled SQLite binary (`/usr/lib/plexmediaserver/Plex SQLite` inside the container) for integrity checks — the system/container-default `sqlite3` will throw a misleading tokenizer error that looks like corruption but isn't.
+- Verify automatic backups' integrity *before* restoring them, not after.
+- Keep Plex appdata on SSD/cache storage.
+- Avoid unclean shutdowns or forced Docker/container kills.
+- Ensure UPS shutdown is configured properly for Unraid.
+- Periodically re-run the integrity check above as a health check, expecting `ok`.
+- If the Plex iOS app keeps showing the corruption warning after a successful repair, log out of the app, uninstall/reinstall it, and sign back in — this clears a cached warning state client-side.
+
+---
+
 ## Template for new entries
 
 ```
