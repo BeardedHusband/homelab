@@ -272,7 +272,7 @@ Several architectural decisions were made to prioritize reliability, security, a
 
 All production issues encountered in this environment are documented in:
 
-docs/Troubleshooting.md
+[Troubleshooting Log](Troubleshooting.md)
 
 Entries include:
 
