@@ -22,30 +22,6 @@ This network was built with the following objectives:
 
 ![Physical Network](../diagrams/Physical-Infrastructure.drawio.png)
 
-# Physical Topology
-
-```text
-                      Internet
-                          │
-              White River Connect Fiber
-                          │
-                  Netgear BE9300 Router
-                          │
-                    2.5 GbE Switch
-          ┌───────────────┴───────────────┐
-          │                               │
-     Unraid Server                Linux Mint Server
-          │                               │
-          │                     Pi-hole / Unbound
-          │                     WireGuard VPN
-          │
-     MoCA Backbone
-          │
-     Gaming Desktop
-          │
-      Steam Deck
-```
-
 ---
 
 # Core Infrastructure
@@ -133,7 +109,9 @@ Cloudflare Tunnel allows remote access while significantly reducing the public a
 
 ---
 
-# Infrastructure Services
+# Application Services
+
+Applications are deployed as Docker containers and grouped by their role within the environment.
 
 Primary Docker services currently include:
 
@@ -201,7 +179,7 @@ Current storage platform:
 
 # Remote Administration
 
-Infrastructure is managed remotely using:
+Infrastructure is administered almost entirely remotely. Administrative access is performed over encrypted channels, eliminating the need for direct physical access except during hardware maintenance.
 
 - SSH
 - NoMachine
@@ -255,7 +233,7 @@ Future improvements:
 
 - ~56 TB protected storage
 - 30+ Docker containers
-- 23 remote users
+- Supports approximately 23 active users
 - Multiple self-hosted services
 - 2.5 GbE LAN
 - Secure remote administration
@@ -275,6 +253,18 @@ Measures taken to improve reliability include:
 - Daily backups
 - Documented recovery procedures
 - Infrastructure troubleshooting log
+
+---
+
+# Design Decisions
+
+Several architectural decisions were made to prioritize reliability, security, and maintainability.
+
+- Infrastructure services (DNS/VPN) run independently from application hosting.
+- Administrative access is performed over WireGuard instead of exposing management ports.
+- Cloudflare Tunnel is used for selected public-facing services to reduce attack surface.
+- Static IP addresses simplify administration and service discovery.
+- Core infrastructure changes and outages are documented to improve future troubleshooting.
 
 ---
 
@@ -299,3 +289,12 @@ Entries include:
 This network is designed to provide practical systems administration experience through daily operation and maintenance.
 
 Rather than building isolated demonstrations, services are deployed for real-world use. Problems are documented, root causes investigated, and recovery procedures recorded to continuously improve both the infrastructure and my understanding of Linux, networking, and systems administration.
+
+---
+
+---
+
+## Additional Documentation
+
+- [Repository Overview](../README.md)
+- [Troubleshooting Log](Troubleshooting.md)
