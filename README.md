@@ -114,7 +114,7 @@ Documentation includes:
 
 The following diagram illustrates the physical layout of the homelab infrastructure.
 
-![Physical Network](diagrams/physical-network.png)
+![Physical Network](diagrams/Physical-Infrastructure.drawio.png)
 
 For more information see:
 
