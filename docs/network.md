@@ -18,6 +18,10 @@ This network was built with the following objectives:
 
 ---
 
+# Physical Architecture
+
+![Physical Network](../diagrams/Physical-Infrastructure.drawio.png)
+
 # Physical Topology
 
 ```text
@@ -148,6 +152,38 @@ Primary Docker services currently include:
 
 ---
 
+# Infrastructure Layout
+
+The homelab intentionally separates infrastructure services from application hosting.
+
+## Unraid Server
+
+Responsible for:
+
+- Docker containers
+- Virtual machines
+- Primary storage
+- Media services
+- Backups
+
+Keeping application workloads isolated simplifies upgrades while taking advantage of Unraid's storage management.
+
+---
+
+## Linux Mint Server
+
+Responsible for:
+
+- Pi-hole
+- Unbound
+- WireGuard
+- DNS
+- Remote administration
+
+Separating core networking services from the primary server ensures DNS and VPN remain available even if Docker maintenance or server reboots are required.
+
+---
+
 # Storage
 
 Current storage platform:
@@ -192,16 +228,18 @@ Infrastructure health is monitored using:
 
 # Security Design
 
-Current security practices include:
+The homelab follows a "minimum exposure" philosophy.
 
-- Static IP assignments
-- WireGuard VPN
-- Cloudflare Tunnel
-- Cloudflare Access
-- Pi-hole DNS
+Current controls include:
+
+- WireGuard for administrative access
+- Cloudflare Tunnel for externally accessible services
+- No inbound management ports exposed publicly
+- Static infrastructure addressing
+- DNS filtering through Pi-hole
 - Password management with Vaultwarden
-- Regular Docker updates
-- Daily backups
+- Regular Docker image updates
+- UPS protection and graceful shutdown capability
 
 Future improvements:
 
@@ -216,12 +254,43 @@ Future improvements:
 # Current Scale
 
 - ~56 TB protected storage
-- 30–40 Docker containers
-- 23 active Plex users
+- 30+ Docker containers
+- 23 remote users
 - Multiple self-hosted services
 - 2.5 GbE LAN
 - Secure remote administration
 - Daily operational use
+
+---
+
+# Availability & Reliability
+
+Measures taken to improve reliability include:
+
+- Dual parity storage
+- APC UPS battery backup
+- SMART monitoring
+- Docker restart policies
+- Static IP addressing
+- Daily backups
+- Documented recovery procedures
+- Infrastructure troubleshooting log
+
+---
+
+# Troubleshooting
+
+All production issues encountered in this environment are documented in:
+
+docs/Troubleshooting.md
+
+Entries include:
+
+- Symptoms
+- Diagnosis process
+- Root cause
+- Resolution
+- Prevention
 
 ---
 
